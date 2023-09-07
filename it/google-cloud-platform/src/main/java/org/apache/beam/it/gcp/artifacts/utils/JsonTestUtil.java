@@ -20,11 +20,15 @@ package org.apache.beam.it.gcp.artifacts.utils;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.MappingIterator;
 import com.fasterxml.jackson.databind.json.JsonMapper;
+import java.io.BufferedReader;
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * The {@link JsonTestUtil} class provides common utilities used for executing tests that involve
@@ -54,6 +58,33 @@ public class JsonTestUtil {
     }
 
     return records;
+  }
+
+  /**
+   * To read new delimited JSON from the bytes array.
+   *
+   * @param jsonBytes
+   * @return
+   * @throws IOException
+   */
+  public static List<Map<String, Object>> readNDJSON(byte[] jsonBytes) throws IOException {
+    try (ByteArrayInputStream inputStream = new ByteArrayInputStream(jsonBytes)) {
+      InputStreamReader reader = new InputStreamReader(inputStream, StandardCharsets.UTF_8);
+      JsonMapper mapper = new JsonMapper();
+
+      return new BufferedReader(reader)
+          .lines()
+          .map(
+              line -> {
+                try {
+                  // Deserialize each line as a Map<String, Object>
+                  return mapper.readValue(line, mapTypeRef);
+                } catch (IOException e) {
+                  throw new RuntimeException(e);
+                }
+              })
+          .collect(Collectors.toList());
+    }
   }
 
   /**
