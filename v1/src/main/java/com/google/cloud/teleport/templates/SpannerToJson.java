@@ -150,7 +150,7 @@ public class SpannerToJson {
             options.getTextWritePrefix(),
             options.getSpannerSnapshotTime(),
             options.getColumnNamesAliasMap(),
-            options.getExportSchema().get());
+            options.getExportSchema());
 
     /* CreateTransaction and CreateTransactionFn classes in LocalSpannerIO
      * only take a timestamp object for exact staleness which works when

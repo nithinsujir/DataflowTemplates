@@ -186,7 +186,7 @@ public class SpannerConverters {
         ValueProvider<String> textWritePrefix,
         ValueProvider<String> timestamp,
         ValueProvider<String> columnNamesAliasMapValue,
-        Boolean exportSchema) {
+        ValueProvider<Boolean> exportSchema) {
       return ExportTransform.builder()
           .table(table)
           .spannerConfig(spannerConfig)
@@ -202,7 +202,7 @@ public class SpannerConverters {
         SpannerConfig spannerConfig,
         ValueProvider<String> textWritePrefix,
         ValueProvider<String> timestamp) {
-      return create(table, spannerConfig, textWritePrefix, timestamp, null, Boolean.TRUE);
+      return create(table, spannerConfig, textWritePrefix, timestamp, null, null);
     }
   }
 
@@ -217,7 +217,7 @@ public class SpannerConverters {
 
     abstract SpannerConfig spannerConfig();
 
-    abstract Boolean exportSchema();
+    abstract ValueProvider<Boolean> exportSchema();
 
     abstract ValueProvider<String> textWritePrefix();
 
@@ -240,7 +240,7 @@ public class SpannerConverters {
       public abstract Builder columnNamesAliasMapValue(
           ValueProvider<String> columnNamesAliasMapValue);
 
-      public abstract Builder exportSchema(Boolean exportSchema);
+      public abstract Builder exportSchema(ValueProvider<Boolean> exportSchema);
 
       public abstract Builder spannerConfig(SpannerConfig spannerConfig);
 
@@ -317,7 +317,7 @@ public class SpannerConverters {
             columns = getAllColumns(context, table().get(), dialect);
             String columnJson = SpannerConverters.GSON.toJson(columns);
 
-            if (BooleanUtils.isTrue(exportSchema())) {
+            if (BooleanUtils.isTrue(exportSchema().get())) {
               LOG.info("Saving schema information");
               saveSchema(columnJson, textWritePrefix().get() + SCHEMA_SUFFIX);
             }
@@ -365,7 +365,7 @@ public class SpannerConverters {
 
       /**
        * Prepare Column Expression to be used in query from the column and aliases value passed by
-       * the user
+       * the user.
        *
        * @param columnNamesAliasMapValue Data passed by user in the following format {@code
        *     "column1: alias1, column2: alias2, column3: alias3"}
@@ -525,7 +525,7 @@ public class SpannerConverters {
   /** Struct printer for converting a Spanner Struct to JSON. */
   public static class StructJSONPrinter {
     /**
-     * To get string in json format from Struct
+     * To get string in json format from Struct.
      *
      * @param struct Spanner Struct.
      * @return Spanner Struct encoded as a JSON String.
@@ -544,7 +544,7 @@ public class SpannerConverters {
     }
 
     /**
-     * To parse Struct using different parsers for different type and process it using JSONWriter
+     * To parse Struct using different parsers for different type and process it using JSONWriter.
      *
      * @param jsonWriter JSON Writer
      * @param struct Data from Spanner
@@ -586,7 +586,7 @@ public class SpannerConverters {
   }
 
   /**
-   * To parse array value as list of derived objects
+   * To parse array value as list of derived objects.
    *
    * @param currentRow Struct
    * @param columnName Column Name
