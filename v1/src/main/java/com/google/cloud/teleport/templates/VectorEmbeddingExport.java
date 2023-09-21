@@ -22,7 +22,7 @@ import com.google.cloud.teleport.metadata.Template;
 import com.google.cloud.teleport.metadata.TemplateCategory;
 import com.google.cloud.teleport.metadata.TemplateParameter;
 import com.google.cloud.teleport.metadata.TemplateParameter.TemplateEnumOption;
-import com.google.cloud.teleport.templates.SpannerToJson.SpannerToJsonOptions;
+import com.google.cloud.teleport.templates.VectorEmbeddingExport.SpannerToJsonOptions;
 import com.google.cloud.teleport.templates.common.SpannerConverters;
 import com.google.cloud.teleport.templates.common.SpannerConverters.CreateTransactionFnWithTimestamp;
 import com.google.cloud.teleport.templates.common.SpannerConverters.SpannerReadOptions;
@@ -35,7 +35,6 @@ import org.apache.beam.sdk.io.gcp.spanner.LocalSpannerIO;
 import org.apache.beam.sdk.io.gcp.spanner.ReadOperation;
 import org.apache.beam.sdk.io.gcp.spanner.SpannerConfig;
 import org.apache.beam.sdk.io.gcp.spanner.Transaction;
-import org.apache.beam.sdk.options.Default;
 import org.apache.beam.sdk.options.PipelineOptions;
 import org.apache.beam.sdk.options.PipelineOptionsFactory;
 import org.apache.beam.sdk.options.ValueProvider;
@@ -53,30 +52,30 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Dataflow template which export data from Spanner table to GCS in json format. It exports a
+ * Dataflow template which export vector embeddings from Spanner to GCS in json format. It exports a
  * Spanner table using <a
  * href="https://cloud.google.com/spanner/docs/reads#read_data_in_parallel">Batch API</a>, which
  * creates multiple workers in parallel for better performance. The result is written to a JSON file
- * in Google Cloud Storage. By default, schema won't be exported if required use optional arguments.
+ * in Google Cloud Storage.
  *
  * <p>Check out <a
  * href="https://github.com/GoogleCloudPlatform/DataflowTemplates/blob/main/v1/README_Spanner_to_GCS_Text.md">README</a>
  * for instructions on how to use or modify this template.
  */
 @Template(
-    name = "Spanner_TO_JSON",
+    name = "Cloud_Spanner_to_Vector_Embedding",
     category = TemplateCategory.BATCH,
-    displayName = "Cloud Spanner to JSON Files on Cloud Storage",
+    displayName = "Cloud Spanner to Vector Embeddings Cloud Storage",
     description =
-        "A pipeline which reads in Cloud Spanner table and writes it to Cloud Storage as JSON"
+        "A pipeline which reads vector embeddings from Cloud Spanner table and writes it to Cloud Storage as JSON"
             + " files.",
     optionsClass = SpannerToJsonOptions.class,
     documentation =
         "https://cloud.google.com/dataflow/docs/guides/templates/provided/cloud-spanner-to-cloud-storage",
     contactInformation = "https://cloud.google.com/support")
-public class SpannerToJson {
+public class VectorEmbeddingExport {
 
-  private static final Logger LOG = LoggerFactory.getLogger(SpannerToJson.class);
+  private static final Logger LOG = LoggerFactory.getLogger(VectorEmbeddingExport.class);
 
   /** Custom PipelineOptions. */
   public interface SpannerToJsonOptions
@@ -108,20 +107,10 @@ public class SpannerToJson {
     ValueProvider<RpcPriority> getSpannerPriority();
 
     void setSpannerPriority(ValueProvider<RpcPriority> value);
-
-    @TemplateParameter.Boolean(
-        order = 3,
-        optional = true,
-        description = "Export Schema",
-        helpText = "To export the schema of the table along with data")
-    @Default.Boolean(false)
-    ValueProvider<Boolean> getExportSchema();
-
-    void setExportSchema(ValueProvider<Boolean> value);
   }
 
   /**
-   * Runs a pipeline which reads in Records from Spanner, and writes the JSON to TextIO sink.
+   * Runs a pipeline which reads in vector embeddings records from Spanner, and writes the JSON to TextIO sink.
    *
    * @param args arguments to the pipeline
    */
@@ -150,7 +139,8 @@ public class SpannerToJson {
             options.getTextWritePrefix(),
             options.getSpannerSnapshotTime(),
             options.getColumnNamesAliasMap(),
-            options.getExportSchema());
+            // disable schema export for vector embeddings export
+            ValueProvider.StaticValueProvider.of(false));
 
     /* CreateTransaction and CreateTransactionFn classes in LocalSpannerIO
      * only take a timestamp object for exact staleness which works when

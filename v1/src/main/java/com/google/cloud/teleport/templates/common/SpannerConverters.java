@@ -43,6 +43,7 @@ import java.io.OutputStream;
 import java.io.StringWriter;
 import java.nio.channels.Channels;
 import java.nio.channels.WritableByteChannel;
+import java.util.Arrays;
 import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -563,11 +564,12 @@ public class SpannerConverters {
         LOG.info("Column Type: {}", struct.getColumnType(columnName).getCode());
         String columnValue = parsers.get(columnName).apply(struct, columnName);
 
-        if (struct.getColumnType(columnName).getCode() == Code.JSON && columnValue != null) {
-          // If the Column is of Type JSON
+        if (Arrays.asList(Code.JSON, Code.PG_JSONB)
+            .contains(struct.getColumnType(columnName).getCode()) && columnValue != null) {
+          // If the column is of type JSON or PG_JSON
           jsonWriter.name(columnName).jsonValue(parsers.get(columnName).apply(struct, columnName));
         } else if (struct.getColumnType(columnName).getCode() == Code.ARRAY) {
-          // If the Column is of Type ARRAY
+          // If the column is of type ARRAY
           List<? extends Object> values = parseArrayValueAsObjectList(struct, columnName);
           jsonWriter.name(columnName);
           jsonWriter.beginArray();
@@ -606,6 +608,8 @@ public class SpannerConverters {
       case PG_NUMERIC:
       case JSON:
         return currentRow.getStringList(columnName);
+      case PG_JSONB:
+        return currentRow.getPgJsonbList(columnName);
       case BYTES:
         return currentRow.getBytesList(columnName).stream()
             .map(byteArray -> Base64.getEncoder().encodeToString(byteArray.toByteArray()))
@@ -665,6 +669,8 @@ public class SpannerConverters {
         return nullSafeColumnParser(Struct::getString);
       case JSON:
         return nullSafeColumnParser(Struct::getJson);
+      case PG_JSONB:
+        return nullSafeColumnParser(Struct::getPgJsonb);
       case BYTES:
         return nullSafeColumnParser(
             (currentRow, columnName) ->

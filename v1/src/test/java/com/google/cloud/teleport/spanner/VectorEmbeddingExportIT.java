@@ -46,11 +46,11 @@ import org.junit.experimental.categories.Category;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
 
-/** Integration test for {@link ExportPipeline Spanner to GCS Avro} template. */
+/** Integration test for {@link ExportPipeline Spanner to GCS JSON} template. */
 @Category(TemplateIntegrationTest.class)
 @TemplateIntegrationTest(ExportPipeline.class)
 @RunWith(JUnit4.class)
-public class ExportToJsonIT extends TemplateTestBase {
+public class VectorEmbeddingExportIT extends TemplateTestBase {
 
   private static final int MESSAGES_COUNT = 100;
 
