@@ -64,7 +64,7 @@ public class JsonTestUtil {
    * To read new delimited JSON from the bytes array.
    *
    * @param jsonBytes
-   * @return
+   * @return List with json
    * @throws IOException
    */
   public static List<Map<String, Object>> readNDJSON(byte[] jsonBytes) throws IOException {

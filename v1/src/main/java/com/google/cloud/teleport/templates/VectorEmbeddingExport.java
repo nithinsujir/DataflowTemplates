@@ -110,7 +110,8 @@ public class VectorEmbeddingExport {
   }
 
   /**
-   * Runs a pipeline which reads in vector embeddings records from Spanner, and writes the JSON to TextIO sink.
+   * Runs a pipeline which reads in vector embeddings records from Spanner, and writes the JSON to
+   * TextIO sink.
    *
    * @param args arguments to the pipeline
    */

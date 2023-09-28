@@ -565,7 +565,8 @@ public class SpannerConverters {
         String columnValue = parsers.get(columnName).apply(struct, columnName);
 
         if (Arrays.asList(Code.JSON, Code.PG_JSONB)
-            .contains(struct.getColumnType(columnName).getCode()) && columnValue != null) {
+                .contains(struct.getColumnType(columnName).getCode())
+            && columnValue != null) {
           // If the column is of type JSON or PG_JSON
           jsonWriter.name(columnName).jsonValue(parsers.get(columnName).apply(struct, columnName));
         } else if (struct.getColumnType(columnName).getCode() == Code.ARRAY) {
