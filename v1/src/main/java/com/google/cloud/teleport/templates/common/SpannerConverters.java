@@ -37,11 +37,13 @@ import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import com.google.gson.stream.JsonWriter;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.io.StringWriter;
 import java.nio.channels.Channels;
 import java.nio.channels.WritableByteChannel;
+import java.util.Arrays;
 import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -64,6 +66,8 @@ import org.apache.beam.sdk.values.PCollection;
 import org.apache.commons.csv.CSVFormat;
 import org.apache.commons.csv.CSVPrinter;
 import org.apache.commons.csv.QuoteMode;
+import org.apache.commons.lang3.BooleanUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -158,6 +162,20 @@ public class SpannerConverters {
     ValueProvider<Boolean> getDataBoostEnabled();
 
     void setDataBoostEnabled(ValueProvider<Boolean> value);
+
+    @TemplateParameter.Text(
+        order = 8,
+        optional = true,
+        description = "Column names with/without aliases",
+        helpText =
+            "If passed, only data from selected column will be exported and aliases will be used as"
+                + "json key in exported json file",
+        example = "column1: alias1, column2: alias2, column3: alias3")
+    @Default.String(value = "")
+    ValueProvider<String> getColumnNamesAliasMap();
+
+    @SuppressWarnings("unused")
+    void setColumnNamesAliasMap(ValueProvider<String> value);
   }
 
   /** Factory for Export transform class. */
@@ -167,13 +185,25 @@ public class SpannerConverters {
         ValueProvider<String> table,
         SpannerConfig spannerConfig,
         ValueProvider<String> textWritePrefix,
-        ValueProvider<String> timestamp) {
+        ValueProvider<String> timestamp,
+        ValueProvider<String> columnNamesAliasMapValue,
+        ValueProvider<Boolean> exportSchema) {
       return ExportTransform.builder()
           .table(table)
           .spannerConfig(spannerConfig)
           .textWritePrefix(textWritePrefix)
           .timestamp(timestamp)
+          .columnNamesAliasMapValue(columnNamesAliasMapValue)
+          .exportSchema(exportSchema)
           .build();
+    }
+
+    public static ExportTransform create(
+        ValueProvider<String> table,
+        SpannerConfig spannerConfig,
+        ValueProvider<String> textWritePrefix,
+        ValueProvider<String> timestamp) {
+      return create(table, spannerConfig, textWritePrefix, timestamp, null, null);
     }
   }
 
@@ -184,7 +214,11 @@ public class SpannerConverters {
 
     abstract ValueProvider<String> table();
 
+    abstract ValueProvider<String> columnNamesAliasMapValue();
+
     abstract SpannerConfig spannerConfig();
+
+    abstract ValueProvider<Boolean> exportSchema();
 
     abstract ValueProvider<String> textWritePrefix();
 
@@ -203,6 +237,11 @@ public class SpannerConverters {
     @AutoValue.Builder
     public abstract static class Builder {
       public abstract Builder table(ValueProvider<String> table);
+
+      public abstract Builder columnNamesAliasMapValue(
+          ValueProvider<String> columnNamesAliasMapValue);
+
+      public abstract Builder exportSchema(ValueProvider<Boolean> exportSchema);
 
       public abstract Builder spannerConfig(SpannerConfig spannerConfig);
 
@@ -278,8 +317,11 @@ public class SpannerConverters {
             LOG.info("Reading schema information");
             columns = getAllColumns(context, table().get(), dialect);
             String columnJson = SpannerConverters.GSON.toJson(columns);
-            LOG.info("Saving schema information");
-            saveSchema(columnJson, textWritePrefix().get() + SCHEMA_SUFFIX);
+
+            if (BooleanUtils.isTrue(exportSchema().get())) {
+              LOG.info("Saving schema information");
+              saveSchema(columnJson, textWritePrefix().get() + SCHEMA_SUFFIX);
+            }
           }
         } finally {
           closeSpannerAccessor();
@@ -293,6 +335,14 @@ public class SpannerConverters {
                 .map(x -> createColumnExpression(x.getKey(), x.getValue(), dialect))
                 .collect(Collectors.joining(","));
         ReadOperation read;
+
+        // To check if selected columns need to be exported
+        if (StringUtils.isNotBlank(columnNamesAliasMapValue().get())) {
+          LOG.info(
+              "Exporting selected columns passed by user: {}", columnNamesAliasMapValue().get());
+          columnsListAsString = prepareColumnExpression(columnNamesAliasMapValue().get());
+        }
+
         switch (dialect) {
           case GOOGLE_STANDARD_SQL:
             read =
@@ -314,6 +364,37 @@ public class SpannerConverters {
         processContext.output(read);
       }
 
+      /**
+       * Prepare Column Expression to be used in query from the column and aliases value passed by
+       * the user.
+       *
+       * @param columnNamesAliasMapValue Data passed by user in the following format {@code
+       *     "column1: alias1, column2: alias2, column3: alias3"}
+       * @return Column Expression ready to be used in DQL
+       */
+      private String prepareColumnExpression(String columnNamesAliasMapValue) {
+        String[] columnsList = columnNamesAliasMapValue.split(",");
+        StringBuilder columnExpressionBuilder = new StringBuilder();
+
+        for (String columnWithAlias : columnsList) {
+          if (StringUtils.isNotBlank(columnWithAlias)) {
+            // Split around ":" to check if alias is present
+            String[] columnMap = columnWithAlias.trim().split(":");
+            columnExpressionBuilder.append(columnMap[0].trim());
+            if (columnMap.length > 1) {
+              columnExpressionBuilder.append(" AS ");
+              columnExpressionBuilder.append(columnMap[1].trim());
+            }
+            columnExpressionBuilder.append(",");
+          }
+        }
+
+        // Removing the last character which is ','
+        columnExpressionBuilder.deleteCharAt(columnExpressionBuilder.length() - 1);
+
+        return columnExpressionBuilder.toString();
+      }
+
       private String createColumnExpression(String columnName, String columnType, Dialect dialect) {
         if (dialect == Dialect.POSTGRESQL) {
           return "\"" + columnName + "\"";
@@ -322,7 +403,7 @@ public class SpannerConverters {
           return "CAST(`" + columnName + "` AS STRING) AS " + columnName;
         }
         if (columnType.equals("JSON")) {
-          return "TO_JSON_STRING(`" + columnName + "`) AS " + columnName;
+          return "`" + columnName + "`";
         }
 
         if (columnType.equals("ARRAY<NUMERIC>")) {
@@ -442,6 +523,110 @@ public class SpannerConverters {
     }
   }
 
+  /** Struct printer for converting a Spanner Struct to JSON. */
+  public static class StructJSONPrinter {
+    /**
+     * To get string in json format from Struct.
+     *
+     * @param struct Spanner Struct.
+     * @return Spanner Struct encoded as a JSON String.
+     */
+    public String print(Struct struct) {
+      StringWriter stringWriter = new StringWriter();
+      try {
+        JsonWriter jsonWriter = new JsonWriter(stringWriter);
+        LinkedHashMap<String, BiFunction<Struct, String, String>> parsers = Maps.newLinkedHashMap();
+        parsers.putAll(mapColumnParsers(struct.getType().getStructFields()));
+        parseResultSet(jsonWriter, struct, parsers);
+      } catch (IOException e) {
+        throw new RuntimeException(e);
+      }
+      return stringWriter.toString();
+    }
+
+    /**
+     * To parse Struct using different parsers for different type and process it using JSONWriter.
+     *
+     * @param jsonWriter JSON Writer
+     * @param struct Data from Spanner
+     * @param parsers Map from Column Name to their parser
+     * @throws IOException
+     */
+    private static void parseResultSet(
+        JsonWriter jsonWriter,
+        Struct struct,
+        LinkedHashMap<String, BiFunction<Struct, String, String>> parsers)
+        throws IOException {
+      // Start the JSON object
+      jsonWriter.beginObject();
+
+      for (String columnName : parsers.keySet()) {
+        LOG.info("Column Type: {}", struct.getColumnType(columnName).getCode());
+        String columnValue = parsers.get(columnName).apply(struct, columnName);
+
+        if (Arrays.asList(Code.JSON, Code.PG_JSONB)
+            .contains(struct.getColumnType(columnName).getCode()) && columnValue != null) {
+          // If the column is of type JSON or PG_JSON
+          jsonWriter.name(columnName).jsonValue(parsers.get(columnName).apply(struct, columnName));
+        } else if (struct.getColumnType(columnName).getCode() == Code.ARRAY) {
+          // If the column is of type ARRAY
+          List<? extends Object> values = parseArrayValueAsObjectList(struct, columnName);
+          jsonWriter.name(columnName);
+          jsonWriter.beginArray();
+          for (Object value : values) {
+            jsonWriter.value(value != null ? value.toString() : null);
+          }
+          jsonWriter.endArray();
+        } else if (parsers.containsKey(columnName) && columnValue != null) {
+          jsonWriter.name(columnName).value(columnValue);
+        } else {
+          throw new RuntimeException("No parser for column: " + columnName);
+        }
+      }
+      jsonWriter.endObject();
+    }
+  }
+
+  /**
+   * To parse array value as list of derived objects.
+   *
+   * @param currentRow Struct
+   * @param columnName Column Name
+   * @return List of generic objects
+   */
+  private static List<? extends Object> parseArrayValueAsObjectList(
+      Struct currentRow, String columnName) {
+    Code code = currentRow.getColumnType(columnName).getArrayElementType().getCode();
+    switch (code) {
+      case BOOL:
+        return currentRow.getBooleanList(columnName);
+      case INT64:
+        return currentRow.getLongList(columnName);
+      case FLOAT64:
+        return currentRow.getDoubleList(columnName);
+      case STRING:
+      case PG_NUMERIC:
+      case JSON:
+        return currentRow.getStringList(columnName);
+      case PG_JSONB:
+        return currentRow.getPgJsonbList(columnName);
+      case BYTES:
+        return currentRow.getBytesList(columnName).stream()
+            .map(byteArray -> Base64.getEncoder().encodeToString(byteArray.toByteArray()))
+            .collect(Collectors.toList());
+      case DATE:
+        return currentRow.getDateList(columnName).stream()
+            .map(Date::toString)
+            .collect(Collectors.toList());
+      case TIMESTAMP:
+        return currentRow.getTimestampList(columnName).stream()
+            .map(Timestamp::toString)
+            .collect(Collectors.toList());
+      default:
+        throw new RuntimeException("Unsupported type: " + code);
+    }
+  }
+
   /** Function to map columns to their corresponding parsing function. */
   private static LinkedHashMap<String, BiFunction<Struct, String, String>> mapColumnParsers(
       List<StructField> fields) {
@@ -482,6 +667,10 @@ public class SpannerConverters {
       case STRING:
       case PG_NUMERIC:
         return nullSafeColumnParser(Struct::getString);
+      case JSON:
+        return nullSafeColumnParser(Struct::getJson);
+      case PG_JSONB:
+        return nullSafeColumnParser(Struct::getPgJsonb);
       case BYTES:
         return nullSafeColumnParser(
             (currentRow, columnName) ->
